@@ -25,13 +25,18 @@ def init_db():
     if 'teacher_name' not in cols_classes:
         c.execute("ALTER TABLE classes ADD COLUMN teacher_name TEXT DEFAULT 'Chưa phân công'")
 
+    # Thêm cột full_name để lưu tên có dấu của học sinh
     c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, class_name TEXT DEFAULT 'Chưa phân lớp')''')
+                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, 
+                  class_name TEXT DEFAULT 'Chưa phân lớp',
+                  full_name TEXT DEFAULT '')''')
     
     c.execute("PRAGMA table_info(users)")
     cols_users = [col[1] for col in c.fetchall()]
     if 'class_name' not in cols_users:
         c.execute("ALTER TABLE users ADD COLUMN class_name TEXT DEFAULT 'Chưa phân lớp'")
+    if 'full_name' not in cols_users:
+        c.execute("ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''")
 
     c.execute('''CREATE TABLE IF NOT EXISTS results
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -39,7 +44,7 @@ def init_db():
                   correct_count INTEGER, wrong_count INTEGER,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 
-    c.execute("INSERT OR REPLACE INTO users (username, password, role, class_name) VALUES ('admin', 'admin123', 'admin', 'Hệ thống')")
+    c.execute("INSERT OR REPLACE INTO users (username, password, role, class_name, full_name) VALUES ('admin', 'admin123', 'admin', 'Hệ thống', 'Quản trị viên')")
     conn.commit()
     conn.close()
 
@@ -76,23 +81,18 @@ class ExamGenerator:
         self.exam.append({"id": q_id, "question": text, "options": options, "answer": correct, "hint": hint, "image": img_b64})
 
     def generate_all(self):
-        # 1. CĂN THỨC (6 câu)
         for i in range(1, 6):
             a = random.randint(2, 10)
             self.build_q(i, rf"Giá trị của $\sqrt{{{a**2}}}$ là:", rf"{a}", [rf"{-a}", rf"{a**2}", rf"{2*a}"], f"HD: $\sqrt{{A^2}} = |A|$.")
         self.build_q(6, r"Rút gọn $\frac{x\sqrt{y} + y\sqrt{x}}{\sqrt{xy}}$ ($x,y > 0$):", r"$\sqrt{x} + \sqrt{y}$", [r"$\sqrt{x} - \sqrt{y}$", r"$x + y$", r"$\sqrt{xy}$"], "HD: Đặt $\sqrt{xy}$ làm nhân tử chung.")
-
-        # 2. HÀM SỐ (3 câu)
         self.build_q(7, r"Hàm số $y = -2x^2$ đồng biến khi:", r"$x < 0$", [r"$x > 0$", r"$x \in \mathbb{R}$", r"$x = 0$"], "HD: a < 0 nên đồng biến khi x < 0.")
         self.build_q(8, "Đỉnh Parabol $y = x^2$ là:", "(0; 0)", ["(1; 1)", "(0; 1)", "(1; 0)"], "HD: Đỉnh tại gốc tọa độ.")
         self.build_q(9, "Đồ thị hàm số $y = ax^2$ là đường gì?", "Parabol", ["Thẳng", "Tròn", "Elip"], "HD: Kiến thức cơ bản.")
-
-        # 3. PHƯƠNG TRÌNH (8 câu)
         self.build_q(10, r"Hệ $\begin{cases} x+y=3 \\ x-y=1 \end{cases}$ có nghiệm:", "(2; 1)", ["(1; 2)", "(2; 2)", "(3; 0)"], "HD: Cộng đại số tìm x=2, y=1.")
         for i in range(11, 18):
             self.build_q(i, rf"Biệt thức $\Delta$ của $x^2 - {i}x + 1 = 0$:", rf"${i**2 - 4}$", [rf"${i**2 + 4}$", "0", "4"], "HD: $\Delta = b^2 - 4ac$.")
-
-        # --- DÒNG 90: ĐÃ SỬA LỖI ---
+        
+        # Sửa lỗi dòng 90 triệt để
         self.build_q(18, "Nghiệm của $2x - 8 > 0$ là:", "x > 4", ["x < 4", "x > -4", "x < -4"], "HD: 2x > 8 => x > 4.")
         
         self.build_q(19, "Số nguyên lớn nhất thỏa mãn $x < 3.5$ là:", "3", ["4", "2", "3.5"], "HD: Số nguyên liền trước 3.5 là 3.")
@@ -184,7 +184,7 @@ def main():
             col_a, col_b = st.columns(2)
             with col_a:
                 with st.form("f_student"):
-                    h_t = st.text_input("Họ và tên học sinh")
+                    h_t = st.text_input("Họ và tên học sinh (Có dấu)")
                     h_p = st.text_input("Mật khẩu", "123")
                     conn = sqlite3.connect('exam_db.sqlite')
                     l_l = [r[0] for r in conn.execute("SELECT class_name FROM classes").fetchall()]
@@ -195,19 +195,24 @@ def main():
                         if u_gen:
                             conn = sqlite3.connect('exam_db.sqlite')
                             try:
-                                conn.execute("INSERT INTO users (username, password, role, class_name) VALUES (?,?,'student',?)", (u_gen, h_p, h_l))
+                                # Lưu cả Tên thật và Tên đăng nhập
+                                conn.execute("INSERT INTO users (username, password, role, class_name, full_name) VALUES (?,?,'student',?,?)", (u_gen, h_p, h_l, h_t))
                                 conn.commit()
-                                st.success(f"Đã tạo: {u_gen}")
+                                st.success(f"Đã tạo: {h_t} -> {u_gen}")
                                 st.rerun()
-                            except: st.error("Tên đăng nhập đã tồn tại!")
+                            except: st.error("Tên đăng nhập này đã tồn tại!")
                             conn.close()
 
             with col_b:
-                st.markdown("**📂 Xuất dữ liệu & Xóa học sinh**")
+                st.markdown("**📂 Danh sách tài khoản trên cùng một dòng**")
                 conn = sqlite3.connect('exam_db.sqlite')
-                df_hs = pd.read_sql_query("SELECT username as 'Tên đăng nhập', password as 'Mật khẩu', class_name as 'Lớp' FROM users WHERE role='student'", conn)
+                # Sắp xếp Họ tên và Tên đăng nhập trên cùng dòng dữ liệu
+                df_hs = pd.read_sql_query("SELECT full_name as 'Họ tên học sinh', username as 'Tên đăng nhập', password as 'Mật khẩu', class_name as 'Lớp' FROM users WHERE role='student'", conn)
                 conn.close()
                 if not df_hs.empty:
+                    # Hiển thị bảng dữ liệu với cột Họ tên cạnh Tên đăng nhập
+                    st.dataframe(df_hs, use_container_width=True)
+                    
                     try:
                         out_ex = BytesIO()
                         with pd.ExcelWriter(out_ex, engine='xlsxwriter') as writer:
@@ -218,7 +223,7 @@ def main():
                         st.download_button("📥 Tải File CSV", csv, "ds_taikhoan.csv", "text/csv")
                     
                     st.write("---")
-                    del_user = st.selectbox("Chọn tài khoản xóa", df_hs['Tên đăng nhập'])
+                    del_user = st.selectbox("Chọn tài khoản để xóa", df_hs['Tên đăng nhập'])
                     if st.button("Xóa tài khoản này", type="secondary"):
                         conn = sqlite3.connect('exam_db.sqlite')
                         conn.execute("DELETE FROM users WHERE username=?", (del_user,))
@@ -229,7 +234,8 @@ def main():
 
         with t1:
             conn = sqlite3.connect('exam_db.sqlite')
-            st.dataframe(pd.read_sql_query("SELECT r.username as 'Tên HS', u.class_name as 'Lớp', r.score as 'Điểm', r.timestamp as 'Thời gian' FROM results r JOIN users u ON r.username = u.username ORDER BY r.timestamp DESC", conn), use_container_width=True)
+            # Cập nhật kết quả hiển thị Họ tên thay vì chỉ mỗi username
+            st.dataframe(pd.read_sql_query("SELECT u.full_name as 'Họ tên', r.username as 'Tài khoản', u.class_name as 'Lớp', r.score as 'Điểm', r.timestamp as 'Thời gian' FROM results r JOIN users u ON r.username = u.username ORDER BY r.timestamp DESC", conn), use_container_width=True)
             conn.close()
 
     else:
