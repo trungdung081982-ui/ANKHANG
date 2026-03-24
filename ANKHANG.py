@@ -19,6 +19,7 @@ def init_db():
                  (class_id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   class_name TEXT UNIQUE, 
                   teacher_name TEXT DEFAULT 'Chưa phân công')''')
+    
     c.execute("PRAGMA table_info(classes)")
     cols_classes = [col[1] for col in c.fetchall()]
     if 'teacher_name' not in cols_classes:
@@ -26,6 +27,7 @@ def init_db():
 
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (username TEXT PRIMARY KEY, password TEXT, role TEXT, class_name TEXT DEFAULT 'Chưa phân lớp')''')
+    
     c.execute("PRAGMA table_info(users)")
     cols_users = [col[1] for col in c.fetchall()]
     if 'class_name' not in cols_users:
@@ -43,9 +45,12 @@ def init_db():
 
 def clean_username(input_str):
     if not input_str: return ""
+    # Chuẩn hóa unicode để tách dấu
     s = unicodedata.normalize('NFD', input_str)
     s = ''.join([c for c in s if unicodedata.category(c) != 'Mn'])
+    # Thay thế chữ đ/Đ
     s = s.replace('đ', 'd').replace('Đ', 'D')
+    # Loại bỏ ký tự đặc biệt và khoảng trắng, chuyển về chữ thường
     s = re.sub(r'[^a-zA-Z0-9]', '', s) 
     return s.lower()
 
@@ -124,19 +129,14 @@ def main():
     st.set_page_config(page_title="Thi Thử Vào 10", layout="wide")
     init_db()
 
-    # Kiểm tra và khởi tạo session state đúng cú pháp
-    if 'user' not in st.session_state: 
-        st.session_state.user = None
-    if 'role' not in st.session_state: 
-        st.session_state.role = None
-    if 'exam' not in st.session_state: 
-        st.session_state.exam = None
-    if 'sub' not in st.session_state: 
-        st.session_state.sub = False
+    if 'user' not in st.session_state: st.session_state.user = None
+    if 'role' not in st.session_state: st.session_state.role = None
+    if 'exam' not in st.session_state: st.session_state.exam = None
+    if 'sub' not in st.session_state: st.session_state.sub = False
 
     if not st.session_state.user:
         st.title("🔑 ĐĂNG NHẬP")
-        u_in = st.text_input("Tên đăng nhập (Viết liền không dấu)")
+        u_in = st.text_input("Tên đăng nhập")
         p_in = st.text_input("Mật khẩu", type="password")
         if st.button("Đăng nhập"):
             u_cl = clean_username(u_in)
@@ -146,69 +146,107 @@ def main():
             if res:
                 st.session_state.user, st.session_state.role = u_cl, res[0]
                 st.rerun()
-            else: st.error("Sai tài khoản/mật khẩu")
+            else: st.error("Sai tài khoản hoặc mật khẩu!")
         return
 
-    st.sidebar.write(f"Chào: {st.session_state.user}")
+    st.sidebar.write(f"Chào: **{st.session_state.user}**")
     if st.sidebar.button("Đăng xuất"):
         st.session_state.clear()
         st.rerun()
 
     if st.session_state.role == 'admin':
-        st.title("⚙️ QUẢN TRỊ")
-        t1, t2, t3 = st.tabs(["📊 Kết quả", "🏫 Lớp & GV", "👤 Học sinh"])
+        st.title("⚙️ QUẢN TRỊ HỆ THỐNG")
+        t1, t2, t3 = st.tabs(["📊 Kết quả thi", "🏫 Lớp & Giáo viên", "👤 Tài khoản Học sinh"])
+        
         with t2:
-            with st.form("f2"):
-                c_n = st.text_input("Lớp")
-                g_n = st.text_input("Giáo viên")
-                if st.form_submit_button("Lưu"):
-                    conn = sqlite3.connect('exam_db.sqlite')
-                    try:
-                        conn.execute("INSERT INTO classes (class_name, teacher_name) VALUES (?,?)", (c_n, g_n))
-                        conn.commit()
-                        st.success("Xong!")
-                    except: st.error("Lỗi!")
-                    conn.close()
+            st.subheader("Quản lý Lớp học")
+            with st.form("f_class"):
+                c_n = st.text_input("Tên lớp (VD: 9A1)")
+                g_n = st.text_input("Giáo viên phụ trách")
+                if st.form_submit_button("Thêm lớp"):
+                    if c_n and g_n:
+                        conn = sqlite3.connect('exam_db.sqlite')
+                        try:
+                            conn.execute("INSERT INTO classes (class_name, teacher_name) VALUES (?,?)", (c_n, g_n))
+                            conn.commit()
+                            st.success(f"Đã thêm lớp {c_n}")
+                        except: st.error("Lớp đã tồn tại!")
+                        conn.close()
+                    else: st.warning("Vui lòng điền đủ thông tin")
             conn = sqlite3.connect('exam_db.sqlite')
-            st.table(pd.read_sql_query("SELECT class_name as Lớp, teacher_name as GV FROM classes", conn))
+            st.table(pd.read_sql_query("SELECT class_name as 'Lớp', teacher_name as 'Giáo viên' FROM classes", conn))
             conn.close()
+
         with t3:
-            with st.form("f3"):
-                h_t = st.text_input("Họ tên HS")
-                h_p = st.text_input("Mật khẩu", "123")
-                conn = sqlite3.connect('exam_db.sqlite')
-                l_l = [r[0] for r in conn.execute("SELECT class_name FROM classes").fetchall()]
-                conn.close()
-                h_l = st.selectbox("Lớp", l_l if l_l else ["Trống"])
-                if st.form_submit_button("Tạo"):
-                    u_gen = clean_username(h_t)
+            st.subheader("Quản lý Học sinh")
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                with st.form("f_student"):
+                    h_t = st.text_input("Họ và tên học sinh")
+                    h_p = st.text_input("Mật khẩu", "123")
                     conn = sqlite3.connect('exam_db.sqlite')
-                    try:
-                        conn.execute("INSERT INTO users (username, password, role, class_name) VALUES (?,?,'student',?)", (u_gen, h_p, h_l))
-                        conn.commit()
-                        st.success(f"Tên đăng nhập: {u_gen}")
-                    except: st.error("Đã tồn tại!")
+                    l_l = [r[0] for r in conn.execute("SELECT class_name FROM classes").fetchall()]
                     conn.close()
+                    h_l = st.selectbox("Chọn lớp", l_l if l_l else ["Trống"])
+                    if st.form_submit_button("Tạo tài khoản"):
+                        u_gen = clean_username(h_t)
+                        if u_gen:
+                            conn = sqlite3.connect('exam_db.sqlite')
+                            try:
+                                conn.execute("INSERT INTO users (username, password, role, class_name) VALUES (?,?,'student',?)", (u_gen, h_p, h_l))
+                                conn.commit()
+                                st.success(f"Đã tạo: {u_gen}")
+                            except: st.error("Tài khoản đã tồn tại!")
+                            conn.close()
+                        else: st.warning("Tên không hợp lệ")
+
+            with col_b:
+                st.markdown("---")
+                st.write("📂 **Xuất danh sách tài khoản**")
+                conn = sqlite3.connect('exam_db.sqlite')
+                df_users = pd.read_sql_query("SELECT username, password, class_name FROM users WHERE role='student'", conn)
+                conn.close()
+                
+                if not df_users.empty:
+                    # Chuyển DataFrame sang Excel lưu trong bộ nhớ
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df_users.to_excel(writer, index=False, sheet_name='TaiKhoan')
+                    
+                    st.download_button(
+                        label="📥 Tải file Excel danh sách HS",
+                        data=output.getvalue(),
+                        file_name="danh_sach_tai_khoan_hs.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.info("Chưa có học sinh nào để xuất.")
+
         with t1:
             conn = sqlite3.connect('exam_db.sqlite')
-            st.dataframe(pd.read_sql_query("SELECT r.username, u.class_name, r.score, r.timestamp FROM results r JOIN users u ON r.username = u.username", conn))
+            st.dataframe(pd.read_sql_query("SELECT r.username as 'Tên đăng nhập', u.class_name as 'Lớp', r.score as 'Điểm', r.timestamp as 'Thời gian' FROM results r JOIN users u ON r.username = u.username ORDER BY r.timestamp DESC", conn), use_container_width=True)
             conn.close()
+
     else:
-        st.title("📝 ĐỀ THI TOÁN 10")
-        if st.button("🆕 BẮT ĐẦU", type="primary"):
+        st.title("📝 LUYỆN THI TOÁN VÀO 10")
+        if st.button("🆕 BẮT ĐẦU ĐỀ THI MỚI", type="primary"):
             st.session_state.exam = ExamGenerator().generate_all()
             st.session_state.sub = False
             st.rerun()
+
         if st.session_state.exam:
             for i, q in enumerate(st.session_state.exam):
                 st.write(f"**Câu {i+1}:** {q['question']}")
                 if q['image']: st.image(f"data:image/png;base64,{q['image']}")
-                ans = st.radio("Chọn:", q['options'], key=f"q{i}", disabled=st.session_state.sub)
+                ans = st.radio("Chọn đáp án:", q['options'], key=f"q{i}", disabled=st.session_state.sub)
                 if st.session_state.sub:
-                    if ans == q['answer']: st.success("Đúng! ✅")
-                    else: st.error(f"Sai ❌. Đáp án: {q['answer']}"); st.info(f"💡 {q['hint']}")
+                    if ans == q['answer']: st.success("Chính xác! ✅")
+                    else:
+                        st.error(f"Sai ❌. Đáp án: {q['answer']}")
+                        st.info(f"💡 {q['hint']}")
                 st.divider()
-            if not st.session_state.sub and st.button("🎯 NỘP BÀI"):
+
+            if not st.session_state.sub and st.button("🎯 NỘP BÀI CHẤM ĐIỂM"):
                 corr = sum(1 for i, q in enumerate(st.session_state.exam) if st.session_state[f"q{i}"] == q['answer'])
                 score = (corr/40)*10
                 conn = sqlite3.connect('exam_db.sqlite')
